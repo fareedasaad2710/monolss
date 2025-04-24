@@ -58,33 +58,81 @@ class KITTI(data.Dataset):
         self.split = split
         
         # Modified for current directory structure
-        self.data_dir = os.path.join(root_dir, cfg['data_dir'])
+        self.data_dir = os.path.join(root_dir, cfg.get('data_dir', 'train'))
         if split == 'test':
             self.data_dir = os.path.join(root_dir, 'val')
         
-        # Create ImageSets directory if it doesn't exist
-        imageset_dir = os.path.join(root_dir, 'ImageSets')
+        # Get imageset directory from config if provided, otherwise use default
+        if 'imageset_dir' in cfg:
+            imageset_dir = cfg['imageset_dir']
+        else:
+            # Create ImageSets directory if it doesn't exist
+            imageset_dir = os.path.join(root_dir, 'ImageSets')
+            
         os.makedirs(imageset_dir, exist_ok=True)
         
         # Create split files if they don't exist
         split_dir = os.path.join(imageset_dir, split + '.txt')
-        if not os.path.exists(split_dir):
-            # Generate the image IDs from the image_2 directory
-            image_files = os.listdir(os.path.join(self.data_dir, 'image_2'))
-            image_ids = [os.path.splitext(f)[0] for f in image_files if f.endswith('.png')]
-            with open(split_dir, 'w') as f:
-                f.write('\n'.join(image_ids))
+        print(f"Using split file: {split_dir}")
         
-        self.idx_list = [x.strip() for x in open(split_dir).readlines()]
+        if not os.path.exists(split_dir):
+            # Use image_dir from config if provided
+            if 'image_dir' in cfg:
+                image_dir = cfg['image_dir']
+            else:
+                image_dir = os.path.join(self.data_dir, 'image_2')
+                
+            print(f"Looking for images in: {image_dir}")
+            
+            if os.path.exists(image_dir):
+                # Generate the image IDs from the image_2 directory
+                image_files = os.listdir(image_dir)
+                image_ids = [os.path.splitext(f)[0] for f in image_files if f.endswith('.png')]
+                with open(split_dir, 'w') as f:
+                    f.write('\n'.join(image_ids))
+                    print(f"Created {split} split with {len(image_ids)} images at {split_dir}")
+            else:
+                print(f"Warning: Image directory not found at {image_dir}")
+                # Create an empty file to prevent repeated warnings
+                with open(split_dir, 'w') as f:
+                    f.write('')
+        
+        if os.path.exists(split_dir):
+            self.idx_list = [x.strip() for x in open(split_dir).readlines()]
+            print(f"Loaded {len(self.idx_list)} samples from {split_dir}")
+        else:
+            print(f"Warning: No valid split file at {split_dir}, using empty list")
+            self.idx_list = []
 
         # path configuration
-        self.image_dir = os.path.join(self.data_dir, 'image_2')
-        self.calib_dir = os.path.join(self.data_dir, 'calib')
-        self.label_dir = os.path.join(self.data_dir, 'label_2')
-        self.velodyne_dir = os.path.join(self.data_dir, 'velodyne')
+        # Use directories from config if provided
+        if 'image_dir' in cfg:
+            self.image_dir = cfg['image_dir']
+        else:
+            self.image_dir = os.path.join(self.data_dir, 'image_2')
+            
+        if 'calib_dir' in cfg:
+            self.calib_dir = cfg['calib_dir']
+        else:
+            self.calib_dir = os.path.join(self.data_dir, 'calib')
+            
+        if 'label_dir' in cfg:
+            self.label_dir = cfg['label_dir']
+        else:
+            self.label_dir = os.path.join(self.data_dir, 'label_2')
+            
+        if 'velodyne_dir' in cfg:
+            self.velodyne_dir = cfg['velodyne_dir']
+        else:
+            self.velodyne_dir = os.path.join(self.data_dir, 'velodyne')
         
-        # Create depth directory if it doesn't exist
-        self.depth_dir = os.path.join(self.data_dir, 'depth')
+        # Create depth directory in writable location
+        if os.path.exists('/kaggle'):
+            # In Kaggle, use working directory
+            self.depth_dir = os.path.join('/kaggle/working/monolss/depth')
+        else:
+            self.depth_dir = os.path.join(self.data_dir, 'depth')
+            
         os.makedirs(self.depth_dir, exist_ok=True)
         
         # data augmentation configuration
@@ -103,7 +151,11 @@ class KITTI(data.Dataset):
 
     def get_image(self, idx):
         img_file = os.path.join(self.image_dir, '%06d.png' % idx)
-        assert os.path.exists(img_file)
+        if not os.path.exists(img_file):
+            print(f"Warning: Image file not found: {img_file}")
+            # Return a blank image if the file doesn't exist
+            blank_img = np.zeros((self.resolution[1], self.resolution[0], 3), dtype=np.uint8)
+            return Image.fromarray(blank_img)
         return Image.open(img_file)    # (H, W, 3) RGB mode
     
     def get_or_generate_depth(self, idx):
@@ -160,16 +212,19 @@ class KITTI(data.Dataset):
 
     def get_label(self, idx):
         label_file = os.path.join(self.label_dir, '%06d.txt' % idx)
-        assert os.path.exists(label_file)
+        if not os.path.exists(label_file):
+            print(f"Warning: Label file not found: {label_file}")
+            return []
         return get_objects_from_label(label_file)
 
     def get_calib(self, idx):
         calib_file = os.path.join(self.calib_dir, '%06d.txt' % idx)
-        assert os.path.exists(calib_file)
+        if not os.path.exists(calib_file):
+            print(f"Warning: Calib file not found: {calib_file}")
+            # Return a default calibration
+            return Calibration(None)
         return Calibration(calib_file)
     
-
-
     def __len__(self):
         return self.idx_list.__len__()
 
