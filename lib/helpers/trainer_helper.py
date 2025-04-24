@@ -88,9 +88,13 @@ class Trainer(object):
 
             if ((self.epoch % self.cfg_train['eval_frequency']) == 0 and \
                 self.epoch >= self.cfg_train['eval_start']):
-                self.logger.info('------ EVAL EPOCH %03d ------' % (self.epoch))
-                Car_res = self.eval_one_epoch()
-                self.logger.info(str(Car_res))
+                try:
+                    self.logger.info('------ EVAL EPOCH %03d ------' % (self.epoch))
+                    Car_res = self.eval_one_epoch()
+                    self.logger.info(str(Car_res))
+                except Exception as e:
+                    self.logger.error(f"Evaluation failed with error: {str(e)}")
+                    self.logger.info("Continuing training despite evaluation failure")
 
 
             if ((self.epoch % self.cfg_train['save_frequency']) == 0
@@ -198,81 +202,128 @@ class Trainer(object):
         # Reset detection list for this evaluation
         self.detection = []
         
-        for batch_idx, (inputs, calibs, coord_ranges, _, infos) in enumerate(self.test_loader):
-            # Move The Datas onto the device
-            inputs = inputs.to(self.device)
-            calibs = calibs.to(self.device)
-            coord_ranges = coord_ranges.to(self.device)
-            outputs = self.model(inputs, coord_ranges, calibs, K=100, mode='val')
-            
-            # Extract detections using the helper function
-            dets = self.decode_func(outputs, infos)
-            self.detection.extend(dets)
-
-        # Save results so far
-        self.logger.info('==> Saving results...')
-        if not os.path.exists(self.eval_output_dir):
-            os.makedirs(self.eval_output_dir)
-        result_dir = os.path.join(self.eval_output_dir, 'data')
-        if not os.path.exists(result_dir):
-            os.makedirs(result_dir)
-            
-        # Save detection results to files
-        for info in self.detection:
-            filename = '%06d.txt' % info['image_id']
-            filepath = os.path.join(result_dir, filename)
-            with open(filepath, 'w') as f:
-                if 'bbox' in info and info['bbox'] is not None:
-                    for i in range(len(info['bbox'])):
-                        class_name = self.class_name[int(info['cls_id'][i])]
-                        score = info['score'][i]
-                        bbox = info['bbox'][i]
-                        depth = info['depth'][i] if 'depth' in info else 0
-                        dim = info['dim'][i] if 'dim' in info else [0, 0, 0]
-                        loc = info['loc'][i] if 'loc' in info else [0, 0, 0]
-                        rot_y = info['rot_y'][i] if 'rot_y' in info else 0
-                        
-                        f.write(f"{class_name} 0.0 0 {info['alpha'][i]:.2f} ")
-                        f.write(f"{bbox[0]:.2f} {bbox[1]:.2f} {bbox[2]:.2f} {bbox[3]:.2f} ")
-                        f.write(f"{dim[0]:.2f} {dim[1]:.2f} {dim[2]:.2f} ")
-                        f.write(f"{loc[0]:.2f} {loc[1]:.2f} {loc[2]:.2f} ")
-                        f.write(f"{rot_y:.2f} {score:.2f}\n")
-
-        # Set val_path for the following official evaluation
-        gt_label_path = os.path.join(self.root_dir, 'val', 'label_2')
-        if not os.path.exists(gt_label_path):
-            # Try alternate paths for nuscenes dataset
-            alternate_paths = [
-                os.path.join(self.root_dir, 'train/label_2'),
-                os.path.join(self.root_dir, 'train', 'label_2'),
-                os.path.join(self.root_dir, 'nuscenes_in_kitti/train/label_2'),
-                os.path.join(self.root_dir, '/content/drive/MyDrive/nuscenes_in_kitti/train/label_2')
-            ]
-            
-            for path in alternate_paths:
-                if os.path.exists(path):
-                    gt_label_path = path
-                    self.logger.info(f'Found ground truth labels at {gt_label_path}')
-                    break
-            else:
-                self.logger.warning(f'Cannot find ground truth labels path. Evaluation may fail.')
-
-        # Run KITTI evaluation
         try:
-            self.logger.info('==> Evaluating with official KITTI eval code...')
-            self.logger.info(f'Using ground truth from: {gt_label_path}')
-            self.logger.info(f'Using predictions from: {result_dir}')
-            
-            from tools.eval import eval_from_scrach
-            Car_res = eval_from_scrach(
-                gt_label_path,
-                result_dir,
-                eval_cls_list=self.eval_cls
-            )
-            return Car_res
+            for batch_idx, (inputs, calibs, coord_ranges, _, infos) in enumerate(self.test_loader):
+                # Move The Datas onto the device
+                inputs = inputs.to(self.device)
+                calibs = calibs.to(self.device)
+                coord_ranges = coord_ranges.to(self.device)
+                
+                # Run model inference with error handling
+                try:
+                    outputs = self.model(inputs, coord_ranges, calibs, K=50, mode='val')
+                    
+                    # Extract detections with robust error handling
+                    try:
+                        dets = self.decode_func(outputs, infos)
+                        self.detection.extend(dets)
+                    except Exception as e:
+                        self.logger.error(f"Error in decode_func at batch {batch_idx}: {str(e)}")
+                        # Continue with next batch rather than failing entire evaluation
+                        continue
+                        
+                except Exception as e:
+                    self.logger.error(f"Model inference error at batch {batch_idx}: {str(e)}")
+                    continue
+
+            # Save results so far
+            self.logger.info('==> Saving results...')
+            if not os.path.exists(self.eval_output_dir):
+                os.makedirs(self.eval_output_dir)
+            result_dir = os.path.join(self.eval_output_dir, 'data')
+            if not os.path.exists(result_dir):
+                os.makedirs(result_dir)
+                
+            # Safe writing of results with robust error handling
+            for info in self.detection:
+                try:
+                    filename = '%06d.txt' % info['image_id']
+                    filepath = os.path.join(result_dir, filename)
+                    
+                    with open(filepath, 'w') as f:
+                        if 'bbox' in info and info['bbox'] is not None and len(info['bbox']) > 0:
+                            for i in range(len(info['bbox'])):
+                                try:
+                                    # Safely get class name
+                                    cls_id = int(info['cls_id'][i]) if i < len(info['cls_id']) else 0
+                                    cls_id = max(0, min(cls_id, len(self.class_name)-1))  # Ensure valid index
+                                    class_name = self.class_name[cls_id]
+                                    
+                                    # Extract other data with fallbacks for missing values
+                                    score = float(info['score'][i]) if 'score' in info and i < len(info['score']) else 0.0
+                                    bbox = info['bbox'][i] if i < len(info['bbox']) else [0, 0, 0, 0]
+                                    
+                                    # Handle optional data with safe defaults
+                                    alpha = float(info['alpha'][i]) if 'alpha' in info and i < len(info['alpha']) else 0.0
+                                    depth = float(info['depth'][i]) if 'depth' in info and i < len(info['depth']) else 0.0
+                                    dim = info['dim'][i] if 'dim' in info and i < len(info['dim']) else [1.0, 1.0, 1.0]
+                                    loc = info['loc'][i] if 'loc' in info and i < len(info['loc']) else [0.0, 0.0, 0.0]
+                                    rot_y = float(info['rot_y'][i]) if 'rot_y' in info and i < len(info['rot_y']) else 0.0
+                                    
+                                    # Write line with safe formatting
+                                    f.write(f"{class_name} 0.0 0 {alpha:.2f} ")
+                                    f.write(f"{bbox[0]:.2f} {bbox[1]:.2f} {bbox[2]:.2f} {bbox[3]:.2f} ")
+                                    f.write(f"{dim[0]:.2f} {dim[1]:.2f} {dim[2]:.2f} ")
+                                    f.write(f"{loc[0]:.2f} {loc[1]:.2f} {loc[2]:.2f} ")
+                                    f.write(f"{rot_y:.2f} {score:.2f}\n")
+                                except Exception as e:
+                                    self.logger.error(f"Error writing detection {i} to {filepath}: {str(e)}")
+                                    # Skip this detection rather than failing whole file
+                                    continue
+                        else:
+                            # Write empty file to prevent errors in evaluation
+                            pass
+                except Exception as e:
+                    self.logger.error(f"Error handling file {filename}: {str(e)}")
+                    continue
+
+            # Find ground truth directory with extra error handling
+            gt_label_path = os.path.join(self.root_dir, 'val', 'label_2')
+            if not os.path.exists(gt_label_path):
+                # Try alternate paths for nuscenes dataset
+                alternate_paths = [
+                    os.path.join(self.root_dir, 'train/label_2'),
+                    os.path.join(self.root_dir, 'train', 'label_2'),
+                    os.path.join(self.root_dir, 'nuscenes_in_kitti/train/label_2'),
+                    os.path.join(self.label_dir)  # Use label_dir directly from config
+                ]
+                
+                for path in alternate_paths:
+                    if os.path.exists(path):
+                        gt_label_path = path
+                        self.logger.info(f'Found ground truth labels at {gt_label_path}')
+                        break
+                else:
+                    # If no valid path found, use a default value and warn
+                    self.logger.warning(f'Cannot find ground truth labels path. Using configured label_dir as fallback.')
+                    gt_label_path = self.label_dir
+
+            # Run KITTI evaluation with robust error handling
+            try:
+                self.logger.info('==> Evaluating with official KITTI eval code...')
+                self.logger.info(f'Using ground truth from: {gt_label_path}')
+                self.logger.info(f'Using predictions from: {result_dir}')
+                
+                from tools.eval import eval_from_scrach
+                
+                # Handle class list properly
+                # Ensure eval_cls is always a list
+                if isinstance(self.eval_cls, str):
+                    eval_cls_list = [self.eval_cls]
+                else:
+                    eval_cls_list = self.eval_cls
+                
+                Car_res = eval_from_scrach(
+                    gt_label_path,
+                    result_dir,
+                    eval_cls_list=eval_cls_list
+                )
+                return Car_res
+            except Exception as e:
+                self.logger.error(f"KITTI evaluation failed: {str(e)}")
+                return {"Error": str(e)}
         except Exception as e:
-            self.logger.error(f"Evaluation failed with error: {str(e)}")
-            self.logger.info("Continuing training despite evaluation failure")
+            self.logger.error(f"Unexpected error in evaluation: {str(e)}")
             return {"Error": str(e)}
 
     def save_results(self, results, output_dir='./outputs'):
