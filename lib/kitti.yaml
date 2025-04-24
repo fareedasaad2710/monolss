@@ -1,9 +1,9 @@
 dataset:
   type: "kitti"
-  data_dir: "/kaggle/input/kitti-dataset/train"
-  root_dir: "/kaggle/input/kitti-dataset" #drive
-  label_dir: "/kaggle/input/kitti-dataset/train/label_2" #drive
-  velodyne_dir: "/kaggle/input/kitti-dataset/train/velodyne" #drive
+  data_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train"
+  root_dir: "/kaggle/input/nuscenes_in_kitti/kitti-dataset" #drive
+  label_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/label_2" #drive
+  velodyne_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/velodyne" #drive
   eval_cls: ["Car", "car"]
   #  eval_cls: ['Car','Pedestrian','Cyclist']
   batch_size: 16
