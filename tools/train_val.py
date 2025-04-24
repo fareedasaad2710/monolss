@@ -20,7 +20,7 @@ from lib.helpers.tester_helper import Tester
 parser = argparse.ArgumentParser(description='implementation of MonoLSS')
 parser.add_argument('-e', '--evaluate', dest='evaluate', action='store_true', help='evaluate model on validation set')
 parser.add_argument('-t', '--test', dest='test', action='store_true', help='evaluate model on test set')
-parser.add_argument('--config', type=str, default='/kaggle/working/monolss/lib/kitti.yaml')
+parser.add_argument('--config', type=str, default='lib/kitti.yaml')
 args = parser.parse_args()
 
 
@@ -36,8 +36,33 @@ def create_logger(log_file):
 
 def main():
     # load cfg
-    assert (os.path.exists(args.config))
-    cfg = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
+    config_path = args.config
+    
+    # Try different path options if the direct path doesn't exist
+    if not os.path.exists(config_path):
+        # Check if we're in Kaggle environment
+        if os.path.exists('/kaggle'):
+            # Try with absolute path in Kaggle
+            kaggle_path = os.path.join('/kaggle/working/monolss', config_path)
+            if os.path.exists(kaggle_path):
+                config_path = kaggle_path
+            else:
+                # For the case of --config kitti_custom.yaml or --config lib/kitti_custom.yaml
+                if not config_path.startswith('lib/'):
+                    kaggle_path = os.path.join('/kaggle/working/monolss/lib', config_path)
+                    if os.path.exists(kaggle_path):
+                        config_path = kaggle_path
+        else:
+            # Try path relative to ROOT_DIR
+            root_relative_path = os.path.join(ROOT_DIR, config_path)
+            if os.path.exists(root_relative_path):
+                config_path = root_relative_path
+    
+    # Final check
+    assert os.path.exists(config_path), f"Config file not found at {config_path}. Please provide the correct path. Current paths tried: {args.config}, {os.path.join('/kaggle/working/monolss', args.config)}"
+    
+    print(f"Using config file at: {config_path}")
+    cfg = yaml.load(open(config_path, 'r'), Loader=yaml.Loader)
     os.makedirs(cfg['trainer']['log_dir'], exist_ok=True)
     logger = create_logger(os.path.join(cfg['trainer']['log_dir'], 'train.log'))
 
