@@ -1,13 +1,14 @@
 dataset:
   type: "kitti"
-  data_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train"
-  root_dir: "/kaggle/input/nuscenes_in_kitti/kitti-dataset" #drive
-  label_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/label_2" #drive
-  velodyne_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/velodyne" #drive
+  data_dir: "nuscenes_in_kitti/train"
+  root_dir: "/kaggle/input/kitti-dataset" # Base path to dataset
+  label_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/label_2"
+  velodyne_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/velodyne"
+  image_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/image_2"
   eval_cls: ["Car", "car"]
   #  eval_cls: ['Car','Pedestrian','Cyclist']
   batch_size: 16
-  num_workers: 16
+  num_workers: 4 # Reduced for Kaggle environment
   class_merging: True
   use_dontcare: False
   use_3d_center: True
@@ -49,12 +50,12 @@ trainer:
   eval_frequency: 10 # evaluation interval (in epoch)
   save_frequency: 10 # checkpoint save interval (in epoch)
   disp_frequency: 50 # display interval (in batch)
-  log_dir: "MonoLSS/logs/"
-  out_dir: "MonoLSS/output/"
+  log_dir: "/kaggle/working/monolss/logs/"
+  out_dir: "/kaggle/working/monolss/output/"
   # resume_model: ''
 
 tester:
   threshold: 0.2 # confidence filter
-  out_dir: "./MonoLSS/testset_out"
+  out_dir: "/kaggle/working/monolss/testset_out"
   resume_model: "monolss.pth" # pre-trained model path
 
