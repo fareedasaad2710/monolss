@@ -188,44 +188,62 @@ class Trainer(object):
         self.model.eval()
 
         results = {}
-        disp_dict = {}
-        progress_bar = tqdm.tqdm(total=len(self.test_loader), leave=True, desc='Evaluation Progress')
-        with torch.no_grad():
-            for batch_idx, (inputs, calibs, coord_ranges, _, info) in enumerate(self.test_loader):
-                # load evaluation data and move data to current device.
-                if type(inputs) != dict:
-                    inputs = inputs.to(self.device)
-                else:
-                    for key in inputs.keys(): inputs[key] = inputs[key].to(self.device)
-                calibs = calibs.to(self.device) 
-                coord_ranges = coord_ranges.to(self.device)
-    
-                outputs = self.model(inputs,coord_ranges,calibs,K=50,mode='val')
+        for batch_idx, (inputs, calibs, coord_ranges, _, infos) in enumerate(self.test_loader):
+            # Move The Datas onto the device
+            inputs = inputs.to(self.device)
+            calibs = calibs.to(self.device)
+            coord_ranges = coord_ranges.to(self.device)
+            outputs = self.model(inputs, coord_ranges, calibs, K=100, mode='val')
+            self.decode_func(outputs, infos)
 
-                dets = extract_dets_from_outputs(outputs, K=50)
-                dets = dets.detach().cpu().numpy()
-                
-                # get corresponding calibs & transform tensor to numpy
-                calibs = [self.test_loader.dataset.get_calib(index)  for index in info['img_id']]
-                info = {key: val.detach().cpu().numpy() for key, val in info.items()}
-                cls_mean_size = self.test_loader.dataset.cls_mean_size
-                dets = decode_detections(dets = dets,
-                                        info = info,
-                                        calibs = calibs,
-                                        cls_mean_size=cls_mean_size,
-                                        threshold = self.cfg_test['threshold'])
-                results.update(dets)
-                progress_bar.update()
-            progress_bar.close()
-        # self.save_results(results)
-        out_dir = os.path.join(self.cfg_train['out_dir'], 'EPOCH_' + str(self.epoch))
-        self.save_results(results, out_dir)
-        Car_res = eval.eval_from_scrach(
-            self.label_dir,
-            os.path.join(out_dir, 'data'),
-            self.eval_cls,
-            ap_mode=40)
-        return Car_res
+        # Save results so far
+        self.logger.info('==> Saving results...')
+        if not os.path.exists(self.eval_output_dir):
+            os.makedirs(self.eval_output_dir)
+        result_dir = os.path.join(self.eval_output_dir, 'data')
+        if not os.path.exists(result_dir):
+            os.makedirs(result_dir)
+        for info in self.detection:
+            filename = '%06d.txt' % info['image_id']
+            filepath = os.path.join(result_dir, filename)
+            self.save_results(info, filepath)
+
+        # Set val_path for the following official evaluation
+        gt_label_path = os.path.join(self.root_dir, 'val', 'label_2')
+        if not os.path.exists(gt_label_path):
+            # Try alternate paths for nuscenes dataset
+            alternate_paths = [
+                os.path.join(self.root_dir, 'train/label_2'),
+                os.path.join(self.root_dir, 'train', 'label_2'),
+                os.path.join(self.root_dir, 'nuscenes_in_kitti/train/label_2'),
+                os.path.join(self.root_dir, '/content/drive/MyDrive/nuscenes_in_kitti/train/label_2')
+            ]
+            
+            for path in alternate_paths:
+                if os.path.exists(path):
+                    gt_label_path = path
+                    self.logger.info(f'Found ground truth labels at {gt_label_path}')
+                    break
+            else:
+                self.logger.warning(f'Cannot find ground truth labels path. Evaluation may fail.')
+
+        # Run KITTI evaluation
+        try:
+            self.logger.info('==> Evaluating with official KITTI eval code...')
+            self.logger.info(f'Using ground truth from: {gt_label_path}')
+            self.logger.info(f'Using predictions from: {result_dir}')
+            
+            from tools.eval import eval_from_scrach
+            Car_res = eval_from_scrach(
+                gt_label_path,
+                result_dir,
+                eval_cls_list=self.cfg['dataset']['eval_cls']
+            )
+            return Car_res
+        except Exception as e:
+            self.logger.error(f"Evaluation failed with error: {str(e)}")
+            self.logger.info("Continuing training despite evaluation failure")
+            return {"Error": str(e)}
 
     def save_results(self, results, output_dir='./outputs'):
         output_dir = os.path.join(output_dir, 'data')

@@ -30,14 +30,19 @@ class KITTI(data.Dataset):
         self.num_classes = 3
         self.max_objs = 50
         self.class_name = ['Pedestrian', 'Car', 'Cyclist']
-        self.cls2id = {'Pedestrian': 0, 'Car': 1, 'Cyclist': 2}
+        
+        # Create case-insensitive class mapping
+        self.cls2id = {'pedestrian': 0, 'car': 1, 'cyclist': 2, 
+                       'Pedestrian': 0, 'Car': 1, 'Cyclist': 2, 
+                       'truck': 1, 'motorcycle': 2} # Map truck to car, motorcycle to cyclist
+                       
         self.resolution = np.array([1280, 384])  # W * H
         self.use_3d_center = cfg['use_3d_center']
         self.writelist = cfg['writelist']
         if cfg['class_merging']:
-            self.writelist.extend(['Van', 'Truck'])
+            self.writelist.extend(['Van', 'Truck', 'van', 'truck'])
         if cfg['use_dontcare']:
-            self.writelist.extend(['DontCare'])
+            self.writelist.extend(['DontCare', 'dontcare'])
         '''    
         ['Car': np.array([3.88311640418,1.62856739989,1.52563191462]),
          'Pedestrian': np.array([0.84422524,0.66068622,1.76255119]),

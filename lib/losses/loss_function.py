@@ -5,7 +5,10 @@ import pdb
 from lib.helpers.decode_helper import _transpose_and_gather_feat
 from lib.losses.focal_loss import focal_loss_cornernet as focal_loss
 from lib.losses.uncertainty_loss import laplacian_aleatoric_uncertainty_loss,laplacian_aleatoric_uncertainty_loss_new
+import os
 
+# Step 1: Set the environment variable
+os.environ['NUMBA_CUDA_MAX_PTX_VERSION'] = '84'  # Limit to 8.4
 
 class Hierarchical_Task_Learning:
     def __init__(self,epoch0_loss,stat_epoch_nums=5):
@@ -28,12 +31,25 @@ class Hierarchical_Task_Learning:
         T=140
         #compute initial weights
         loss_weights = {}
-        eval_loss_input = torch.cat([_.unsqueeze(0) for _ in current_loss.values()]).unsqueeze(0)
+        # Find first device from tensor values
+        device = None
+        for val in current_loss.values():
+            if torch.is_tensor(val):
+                device = val.device
+                break
+        if device is None:
+            device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            
+        # Create tensors on the same device
+        eval_loss_input = torch.cat([
+            torch.tensor(_, device=device).unsqueeze(0) if isinstance(_, float) else _.to(device).unsqueeze(0) 
+            for _ in current_loss.values()
+        ]).unsqueeze(0)
         for term in self.loss_graph:
             if len(self.loss_graph[term])==0:
-                loss_weights[term] = torch.tensor(1.0).to(current_loss[term].device)
+                loss_weights[term] = torch.tensor(1.0).to(device)
             else:
-                loss_weights[term] = torch.tensor(0.0).to(current_loss[term].device) 
+                loss_weights[term] = torch.tensor(0.0).to(device) 
         #update losses list
         if len(self.past_losses)==self.stat_epoch_nums:
             past_loss = torch.cat(self.past_losses)
@@ -124,7 +140,7 @@ class LSS_Loss(nn.Module):
         vis_depth_loss = laplacian_aleatoric_uncertainty_loss_new(vis_depth,
                                                         vis_depth_target,
                                                         vis_depth_uncer)  
-       	device = vis_depth.device
+        device = vis_depth.device
         if self.epoch < 100:
             vis_depth_loss = torch.mean(vis_depth_loss)
         else:
@@ -243,7 +259,7 @@ def compute_heading_loss(input, ind, mask, target_cls, target_reg):
 
 
 def gumbel_softmax_topk(logits, tau=1, hard=False, eps=1e-10, dim=-1,k=1,soft_ = False):
-    # type: (Tensor, float, bool, float, int) -> Tensor
+    # type: (Tensor, float, bool, float, int, int, bool) -> Tensor
     r"""
     Samples from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
 
