@@ -39,6 +39,14 @@ class Trainer(object):
         self.class_name = test_loader.dataset.class_name
         self.label_dir = cfg['dataset']['label_dir']
         self.eval_cls = cfg['dataset']['eval_cls']
+        
+        # Set up the root directory for evaluation
+        self.root_dir = cfg['dataset']['root_dir']
+        self.eval_output_dir = cfg['tester']['out_dir']
+        self.detection = [] # Initialize detection list for evaluation
+        
+        # Add decode_func to fix the AttributeError
+        self.decode_func = extract_dets_from_outputs
 
         if self.cfg_train.get('resume_model', None):
             assert os.path.exists(self.cfg_train['resume_model'])
@@ -187,14 +195,19 @@ class Trainer(object):
     def eval_one_epoch(self):
         self.model.eval()
 
-        results = {}
+        # Reset detection list for this evaluation
+        self.detection = []
+        
         for batch_idx, (inputs, calibs, coord_ranges, _, infos) in enumerate(self.test_loader):
             # Move The Datas onto the device
             inputs = inputs.to(self.device)
             calibs = calibs.to(self.device)
             coord_ranges = coord_ranges.to(self.device)
             outputs = self.model(inputs, coord_ranges, calibs, K=100, mode='val')
-            self.decode_func(outputs, infos)
+            
+            # Extract detections using the helper function
+            dets = self.decode_func(outputs, infos)
+            self.detection.extend(dets)
 
         # Save results so far
         self.logger.info('==> Saving results...')
@@ -203,10 +216,27 @@ class Trainer(object):
         result_dir = os.path.join(self.eval_output_dir, 'data')
         if not os.path.exists(result_dir):
             os.makedirs(result_dir)
+            
+        # Save detection results to files
         for info in self.detection:
             filename = '%06d.txt' % info['image_id']
             filepath = os.path.join(result_dir, filename)
-            self.save_results(info, filepath)
+            with open(filepath, 'w') as f:
+                if 'bbox' in info and info['bbox'] is not None:
+                    for i in range(len(info['bbox'])):
+                        class_name = self.class_name[int(info['cls_id'][i])]
+                        score = info['score'][i]
+                        bbox = info['bbox'][i]
+                        depth = info['depth'][i] if 'depth' in info else 0
+                        dim = info['dim'][i] if 'dim' in info else [0, 0, 0]
+                        loc = info['loc'][i] if 'loc' in info else [0, 0, 0]
+                        rot_y = info['rot_y'][i] if 'rot_y' in info else 0
+                        
+                        f.write(f"{class_name} 0.0 0 {info['alpha'][i]:.2f} ")
+                        f.write(f"{bbox[0]:.2f} {bbox[1]:.2f} {bbox[2]:.2f} {bbox[3]:.2f} ")
+                        f.write(f"{dim[0]:.2f} {dim[1]:.2f} {dim[2]:.2f} ")
+                        f.write(f"{loc[0]:.2f} {loc[1]:.2f} {loc[2]:.2f} ")
+                        f.write(f"{rot_y:.2f} {score:.2f}\n")
 
         # Set val_path for the following official evaluation
         gt_label_path = os.path.join(self.root_dir, 'val', 'label_2')
@@ -237,7 +267,7 @@ class Trainer(object):
             Car_res = eval_from_scrach(
                 gt_label_path,
                 result_dir,
-                eval_cls_list=self.cfg['dataset']['eval_cls']
+                eval_cls_list=self.eval_cls
             )
             return Car_res
         except Exception as e:
