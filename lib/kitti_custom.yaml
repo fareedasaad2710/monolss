@@ -1,10 +1,10 @@
 dataset:
   type: "kitti"
-  data_dir: "/kaggle/input/kitti-dataset/train" # Full path to the data directory
-  root_dir: "/kaggle/input/kitti-dataset" # Updated for Kaggle
-  label_dir: "/kaggle/input/kitti-dataset/train/label_2" # Updated for Kaggle
-  velodyne_dir: "/kaggle/input/kitti-dataset/train/velodyne" # Updated for Kaggle
-  image_dir: "/kaggle/input/kitti-dataset/train/image_2" # Added explicit image directory
+  data_dir: "nuscenes_in_kitti/train"
+  root_dir: "/kaggle/input/kitti-dataset" # Base path to dataset
+  label_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/label_2"
+  velodyne_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/velodyne"
+  image_dir: "/kaggle/input/kitti-dataset/nuscenes_in_kitti/train/image_2" # This path seems to work
   eval_cls: ["Car", "car"]
   #  eval_cls: ['Car','Pedestrian','Cyclist']
   batch_size: 16
